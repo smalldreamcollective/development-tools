@@ -119,14 +119,14 @@ def prompt(
 
     click.echo(response_text)
     click.echo()
-    click.echo(
-        click.style(
-            f"[{record.model}] "
-            f"{record.input_tokens} in / {record.output_tokens} out | "
-            f"Cost: ${record.total_cost:.6f}",
-            fg="cyan",
-        )
+    cost_line = (
+        f"[{record.model}] "
+        f"{record.input_tokens} in / {record.output_tokens} out | "
+        f"Cost: ${record.total_cost:.6f}"
     )
+    if record.water_ml > 0:
+        cost_line += f" | Water: ~{record.water_ml:.1f} mL"
+    click.echo(click.style(cost_line, fg="cyan"))
 
 
 def _call_anthropic(text: str, model: str, max_tokens: int, system: str | None):
@@ -187,10 +187,13 @@ def estimate(ctx: click.Context, text: str | None, model: str) -> None:
     meter = _get_meter(ctx.obj["db"])
     token_count = meter.tokens.count_local(text, model=model)
     cost = meter.cost.estimate_input_cost(text, model)
+    water = meter.estimate_water(text, model)
 
     click.echo(f"Model:            {model}")
     click.echo(f"Estimated tokens: {token_count:,}")
     click.echo(f"Estimated cost:   ${cost:.6f}")
+    if water > 0:
+        click.echo(f"Estimated water:  ~{water:.1f} mL")
 
 
 # ---------- usage ----------
@@ -231,10 +234,15 @@ def usage(
         total = meter.tracker.get_total(
             provider=provider, model=model, since=since_dt, until=until_dt
         )
+        total_water = meter.tracker.get_total_water(
+            provider=provider, model=model, since=since_dt, until=until_dt
+        )
         records = meter.tracker.get_records(
             provider=provider, model=model, since=since_dt, until=until_dt
         )
         click.echo(f"Total spending: ${total:.6f}")
+        if total_water > 0:
+            click.echo(f"Total water:    ~{total_water:.1f} mL")
         click.echo(f"Total requests: {len(records)}")
         if records:
             total_input = sum(r.input_tokens for r in records)
@@ -279,11 +287,12 @@ def history(
     # Show most recent first, limited
     records = sorted(records, key=lambda r: r.timestamp, reverse=True)[:limit]
 
-    click.echo(f"{'Timestamp':<20} {'Model':<25} {'In':>8} {'Out':>8} {'Cost':>12}")
-    click.echo(f"{'─' * 75}")
+    click.echo(f"{'Timestamp':<20} {'Model':<25} {'In':>8} {'Out':>8} {'Cost':>12} {'Water':>10}")
+    click.echo(f"{'─' * 85}")
     for r in records:
         ts = r.timestamp.strftime("%Y-%m-%d %H:%M")
-        click.echo(f"{ts:<20} {r.model:<25} {r.input_tokens:>8,} {r.output_tokens:>8,} ${r.total_cost:>10.6f}")
+        water_str = f"~{r.water_ml:.1f} mL" if r.water_ml > 0 else "—"
+        click.echo(f"{ts:<20} {r.model:<25} {r.input_tokens:>8,} {r.output_tokens:>8,} ${r.total_cost:>10.6f} {water_str:>10}")
 
 
 # ---------- budget ----------

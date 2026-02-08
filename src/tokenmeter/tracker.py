@@ -11,6 +11,7 @@ from tokenmeter.cost import CostCalculator
 from tokenmeter.providers import ProviderRegistry
 from tokenmeter.storage._base import StorageBackend
 from tokenmeter.storage.memory import MemoryStorage
+from tokenmeter.water.calculator import WaterCalculator
 
 
 class UsageTracker:
@@ -22,11 +23,13 @@ class UsageTracker:
         cost_calculator: CostCalculator | None = None,
         providers: ProviderRegistry | None = None,
         session_id: str | None = None,
+        water_calculator: WaterCalculator | None = None,
     ) -> None:
         self._storage = storage or MemoryStorage()
         self._cost = cost_calculator or CostCalculator()
         self._providers = providers or ProviderRegistry()
         self._session_id = session_id or str(uuid.uuid4())
+        self._water = water_calculator
 
     @property
     def session_id(self) -> str:
@@ -44,29 +47,45 @@ class UsageTracker:
         usage = provider.extract_usage(response)
         model = provider.extract_model(response)
 
+        input_toks = usage["input_tokens"]
+        output_toks = usage["output_tokens"]
+        cache_read_toks = usage.get("cache_read_tokens", 0)
+        cache_write_toks = usage.get("cache_write_tokens", 0)
+
         costs = self._cost.calculate_detailed(
             model=model,
-            input_tokens=usage["input_tokens"],
-            output_tokens=usage["output_tokens"],
-            cache_read_tokens=usage.get("cache_read_tokens", 0),
-            cache_write_tokens=usage.get("cache_write_tokens", 0),
+            input_tokens=input_toks,
+            output_tokens=output_toks,
+            cache_read_tokens=cache_read_toks,
+            cache_write_tokens=cache_write_toks,
         )
+
+        water_ml = Decimal("0")
+        if self._water is not None:
+            water_ml = self._water.calculate(
+                model=model,
+                input_tokens=input_toks,
+                output_tokens=output_toks,
+                cache_read_tokens=cache_read_toks,
+                cache_write_tokens=cache_write_toks,
+            )
 
         record = UsageRecord(
             id=str(uuid.uuid4()),
             timestamp=datetime.now(),
             provider=provider.name,
             model=model,
-            input_tokens=usage["input_tokens"],
-            output_tokens=usage["output_tokens"],
-            cache_read_tokens=usage.get("cache_read_tokens", 0),
-            cache_write_tokens=usage.get("cache_write_tokens", 0),
+            input_tokens=input_toks,
+            output_tokens=output_toks,
+            cache_read_tokens=cache_read_toks,
+            cache_write_tokens=cache_write_toks,
             input_cost=costs["input_cost"],
             output_cost=costs["output_cost"],
             total_cost=costs["total_cost"],
             session_id=session_id or self._session_id,
             user_id=user_id,
             tags=dict(tags),
+            water_ml=water_ml,
         )
 
         self._storage.save(record)
@@ -97,6 +116,16 @@ class UsageTracker:
             cache_write_tokens=cache_write_tokens,
         )
 
+        water_ml = Decimal("0")
+        if self._water is not None:
+            water_ml = self._water.calculate(
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+            )
+
         record = UsageRecord(
             id=str(uuid.uuid4()),
             timestamp=datetime.now(),
@@ -113,6 +142,7 @@ class UsageTracker:
             user_id=user_id,
             tags=dict(tags),
             is_estimate=is_estimate,
+            water_ml=water_ml,
         )
 
         self._storage.save(record)
@@ -139,6 +169,28 @@ class UsageTracker:
             tags=tags,
         )
         return sum((r.total_cost for r in records), Decimal("0"))
+
+    def get_total_water(
+        self,
+        provider: str | None = None,
+        model: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        tags: dict[str, str] | None = None,
+    ) -> Decimal:
+        """Get total water usage (mL) with optional filters."""
+        records = self._storage.query(
+            provider=provider,
+            model=model,
+            user_id=user_id,
+            session_id=session_id,
+            since=since,
+            until=until,
+            tags=tags,
+        )
+        return sum((r.water_ml for r in records), Decimal("0"))
 
     def get_records(
         self,
