@@ -4,11 +4,12 @@ import pytest
 
 from tests.conftest import make_anthropic_response, make_openai_response
 from tokenmeter.tracker import UsageTracker
+from tokenmeter.water.calculator import WaterCalculator
 
 
 @pytest.fixture
 def tracker():
-    return UsageTracker()
+    return UsageTracker(water_calculator=WaterCalculator())
 
 
 class TestUsageTracker:
@@ -94,3 +95,19 @@ class TestUsageTracker:
         tracker.record(make_anthropic_response())
         records = tracker.get_records(session_id=tracker.session_id)
         assert len(records) == 1
+
+    def test_record_includes_water_ml(self, tracker):
+        record = tracker.record_manual(
+            model="claude-sonnet-4-5", input_tokens=1000, output_tokens=500
+        )
+        assert record.water_ml > Decimal("0")
+
+    def test_get_total_water(self, tracker):
+        r1 = tracker.record_manual(
+            model="claude-sonnet-4-5", input_tokens=1000, output_tokens=500
+        )
+        r2 = tracker.record_manual(
+            model="claude-sonnet-4-5", input_tokens=2000, output_tokens=1000
+        )
+        total_water = tracker.get_total_water()
+        assert total_water == r1.water_ml + r2.water_ml

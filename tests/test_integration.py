@@ -6,7 +6,7 @@ import pytest
 
 import tokenmeter
 from tests.conftest import make_anthropic_response, make_openai_response
-from tokenmeter._types import BudgetExceededError
+from tokenmeter._types import BudgetExceededError, WaterProfile
 
 
 class TestMeterIntegration:
@@ -105,3 +105,28 @@ class TestMeterIntegration:
         assert "QUICK START" in captured.out
         assert "BUDGETS" in captured.out
         assert "ALERTS" in captured.out
+        assert "WATER ESTIMATION" in captured.out
+
+    def test_water_tracking(self):
+        meter = tokenmeter.Meter()
+        resp = make_anthropic_response(input_tokens=1000, output_tokens=500)
+        record = meter.record(resp)
+        assert record.water_ml > Decimal("0")
+        assert meter.total_water() == record.water_ml
+
+    def test_estimate_water(self):
+        meter = tokenmeter.Meter()
+        water = meter.estimate_water("Hello world", model="claude-sonnet-4-5")
+        assert isinstance(water, Decimal)
+        assert water > Decimal("0")
+
+    def test_custom_water_profile(self):
+        profile = WaterProfile(
+            pue=Decimal("1.1"),
+            wue_site=Decimal("1.5"),
+            wue_source=Decimal("0.4"),
+        )
+        meter = tokenmeter.Meter(water_profile=profile)
+        resp = make_anthropic_response(input_tokens=1000, output_tokens=500)
+        record = meter.record(resp)
+        assert record.water_ml > Decimal("0")

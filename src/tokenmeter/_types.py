@@ -46,6 +46,7 @@ class UsageRecord:
     user_id: str | None = None
     tags: dict[str, str] = field(default_factory=dict)
     is_estimate: bool = False
+    water_ml: Decimal = Decimal("0")  # estimated water usage in milliliters
 
 
 @dataclass
@@ -76,6 +77,24 @@ class AlertThreshold:
     percentage: float
     message: str | None = None
     triggered: bool = False
+
+
+@dataclass(frozen=True)
+class WaterProfile:
+    """Environmental factors for water estimation. Defaults are U.S. averages."""
+
+    pue: Decimal = Decimal("1.2")
+    wue_site: Decimal = Decimal("1.8")  # L/kWh, on-site cooling
+    wue_source: Decimal = Decimal("0.5")  # L/kWh, upstream electricity
+
+
+@dataclass(frozen=True)
+class ModelWaterProfile:
+    """Energy characteristics for a model. energy_per_mtok is Wh per million tokens."""
+
+    model_id: str
+    provider: str
+    energy_per_mtok: Decimal
 
 
 class UnknownModelError(Exception):

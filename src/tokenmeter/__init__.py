@@ -11,8 +11,10 @@ from tokenmeter._types import (
     BudgetExceededError,
     BudgetStatus,
     ModelPricing,
+    ModelWaterProfile,
     UnknownModelError,
     UsageRecord,
+    WaterProfile,
 )
 from tokenmeter.alerts import AlertManager
 from tokenmeter.budget import BudgetManager
@@ -23,6 +25,8 @@ from tokenmeter.storage import create_storage
 from tokenmeter.storage._base import StorageBackend
 from tokenmeter.tokens import TokenCounter
 from tokenmeter.tracker import UsageTracker
+from tokenmeter.water import WaterRegistry
+from tokenmeter.water.calculator import WaterCalculator
 
 __version__ = "0.1.0"
 
@@ -35,8 +39,12 @@ __all__ = [
     "AlertManager",
     "PricingRegistry",
     "ProviderRegistry",
+    "WaterProfile",
+    "WaterCalculator",
+    "WaterRegistry",
     "UsageRecord",
     "ModelPricing",
+    "ModelWaterProfile",
     "BudgetConfig",
     "BudgetStatus",
     "AlertThreshold",
@@ -98,6 +106,18 @@ STANDALONE COST CALCULATION
   cost = calc.calculate(model="gpt-4o", input_tokens=1500, output_tokens=500)
   details = calc.calculate_detailed(model="claude-opus-4-6", input_tokens=10000, output_tokens=5000)
 
+WATER ESTIMATION
+----------------
+  meter = Meter(water_profile=WaterProfile())       # default U.S. averages
+  meter.estimate_water("your prompt", model="claude-sonnet-4-5")
+  meter.total_water()                                 # total mL across all calls
+  meter.total_water(model="gpt-4o")                   # filter by model
+
+  Custom environmental factors:
+    from tokenmeter import WaterProfile
+    profile = WaterProfile(pue=Decimal("1.1"), wue_site=Decimal("1.5"), wue_source=Decimal("0.4"))
+    meter = Meter(water_profile=profile)
+
 SUPPORTED MODELS
 ----------------
   Anthropic: Claude Opus 4.6/4.5/4.1/4, Sonnet 4.5/4, Haiku 4.5/3.5/3
@@ -126,12 +146,19 @@ class Meter:
         storage: str | StorageBackend = "memory",
         session_id: str | None = None,
         user_id: str | None = None,
+        water_profile: WaterProfile | None = None,
         **storage_kwargs: str,
     ) -> None:
         self._pricing = PricingRegistry()
         self._provider_registry = ProviderRegistry()
         self._storage = create_storage(storage, **storage_kwargs)
         self._default_user_id = user_id
+
+        self._water_registry = WaterRegistry()
+        self.water = WaterCalculator(
+            registry=self._water_registry,
+            profile=water_profile or WaterProfile(),
+        )
 
         self.cost = CostCalculator(self._pricing)
         self.tokens = TokenCounter(self._provider_registry)
@@ -140,6 +167,7 @@ class Meter:
             cost_calculator=self.cost,
             providers=self._provider_registry,
             session_id=session_id,
+            water_calculator=self.water,
         )
         self.budget = BudgetManager(self.tracker)
         self.alerts = AlertManager(self.budget)
@@ -165,6 +193,14 @@ class Meter:
     def total(self, **filters: Any) -> Decimal:
         """Get total spending with optional filters."""
         return self.tracker.get_total(**filters)
+
+    def total_water(self, **filters: Any) -> Decimal:
+        """Get total water usage (mL) with optional filters."""
+        return self.tracker.get_total_water(**filters)
+
+    def estimate_water(self, text: str, model: str) -> Decimal:
+        """Estimate the water usage of sending this text as input to a model."""
+        return self.water.estimate_input_water(text, model)
 
     def summary(self, group_by: str = "model") -> dict[str, Decimal]:
         """Aggregate spending by model, provider, user_id, or session_id."""

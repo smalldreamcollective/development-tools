@@ -85,6 +85,7 @@ def _record_to_dict(record: UsageRecord) -> dict:
         "user_id": record.user_id,
         "tags": record.tags,
         "is_estimate": record.is_estimate,
+        "water_ml": str(record.water_ml),
     }
 
 
@@ -105,4 +106,5 @@ def _dict_to_record(d: dict) -> UsageRecord:
         user_id=d.get("user_id"),
         tags=d.get("tags", {}),
         is_estimate=d.get("is_estimate", False),
+        water_ml=Decimal(d.get("water_ml", "0")),
     )

@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS usage_records (
     session_id TEXT,
     user_id TEXT,
     tags TEXT,
-    is_estimate INTEGER DEFAULT 0
+    is_estimate INTEGER DEFAULT 0,
+    water_ml TEXT DEFAULT '0'
 );
 CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_records(timestamp);
 CREATE INDEX IF NOT EXISTS idx_provider ON usage_records(provider);
@@ -48,6 +49,10 @@ class SQLiteStorage(StorageBackend):
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            # Migrate: add water_ml column if missing (pre-water databases)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(usage_records)").fetchall()}
+            if "water_ml" not in columns:
+                conn.execute("ALTER TABLE usage_records ADD COLUMN water_ml TEXT DEFAULT '0'")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
@@ -58,8 +63,8 @@ class SQLiteStorage(StorageBackend):
                 """INSERT OR REPLACE INTO usage_records
                 (id, timestamp, provider, model, input_tokens, output_tokens,
                  cache_read_tokens, cache_write_tokens, input_cost, output_cost,
-                 total_cost, session_id, user_id, tags, is_estimate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 total_cost, session_id, user_id, tags, is_estimate, water_ml)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     record.id,
                     record.timestamp.isoformat(),
@@ -76,6 +81,7 @@ class SQLiteStorage(StorageBackend):
                     record.user_id,
                     json.dumps(record.tags) if record.tags else None,
                     int(record.is_estimate),
+                    str(record.water_ml),
                 ),
             )
 
@@ -150,4 +156,5 @@ def _row_to_record(row: sqlite3.Row) -> UsageRecord:
         user_id=row["user_id"],
         tags=json.loads(tags_str) if tags_str else {},
         is_estimate=bool(row["is_estimate"]),
+        water_ml=Decimal(row["water_ml"]) if row["water_ml"] else Decimal("0"),
     )

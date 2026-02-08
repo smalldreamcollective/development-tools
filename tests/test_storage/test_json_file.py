@@ -69,3 +69,15 @@ class TestJsonFileStorage:
         results = storage2.query()
         assert len(results) == 1
         assert results[0].id == record.id
+
+    def test_water_ml_serialization(self, storage):
+        record = _make_record(water_ml=Decimal("12.345"))
+        storage.save(record)
+        results = storage.query()
+        assert results[0].water_ml == Decimal("12.345")
+
+    def test_water_ml_default_fallback(self, storage):
+        record = _make_record()
+        storage.save(record)
+        results = storage.query()
+        assert results[0].water_ml == Decimal("0")
